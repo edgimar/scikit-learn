@@ -8,19 +8,16 @@ from __future__ import print_function
 
 import warnings
 from abc import ABCMeta, abstractmethod
-from time import time
 
 import numpy as np
 
-from .. import cluster
+#from .. import cluster
 from ..base import BaseEstimator
 from ..base import DensityMixin
 from ..externals import six
 from ..exceptions import ConvergenceWarning
-from ..utils import check_array, check_random_state
+from ..utils import check_array  # , check_random_state
 from ..utils.extmath import logsumexp
-
-
 
 
 def _check_shape(param, param_shape, name):
@@ -74,16 +71,7 @@ class BaseMixture(six.with_metaclass(ABCMeta, DensityMixin, BaseEstimator)):
     used as an estimator.
     """
 
-    def __init__(self, reg_covar, random_state):
-        """
-        Parameters
-        ----------
-        reg_covar : float > 0
-            a number indicating how large the covariance used for
-            regularization should be.  Used by subclasses.
-
-        """
-        self.reg_covar = reg_covar
+    def __init__(self, random_state):
         self.random_state = random_state
 
     def _check_initial_parameters(self, X):
@@ -93,11 +81,8 @@ class BaseMixture(six.with_metaclass(ABCMeta, DensityMixin, BaseEstimator)):
         ----------
         X : array-like, shape (n_samples, n_features)
         """
-        if self.reg_covar < 0.:
-            raise ValueError("Invalid value for 'reg_covar': %.5f "
-                             "regularization on covariance must be "
-                             "non-negative"
-                             % self.reg_covar)
+        #if :
+        #    raise ValueError("..." % ...)
 
         # Check all the parameters values of the derived class
         self._check_parameters(X)
