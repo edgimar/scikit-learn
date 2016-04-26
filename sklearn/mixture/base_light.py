@@ -207,7 +207,7 @@ class BaseMixture(six.with_metaclass(ABCMeta, DensityMixin, BaseEstimator)):
     def _set_parameters(self, params):
         pass
 
-    def score_samples(self, X):
+    def score_samples(self, X, normalized_weights=True):
         """Compute the weighted log probabilities for each sample.
 
         Parameters
@@ -224,7 +224,7 @@ class BaseMixture(six.with_metaclass(ABCMeta, DensityMixin, BaseEstimator)):
         self._check_is_fitted()
         X = _check_X(X, None, self.means_.shape[1])
 
-        return logsumexp(self._estimate_weighted_log_prob(X), axis=1)
+        return logsumexp(self._estimate_weighted_log_prob(X, normalized_weights), axis=1)
 
     def score(self, X, y=None):
         """Compute the per-sample average log-likelihood of the given data X.
@@ -280,7 +280,7 @@ class BaseMixture(six.with_metaclass(ABCMeta, DensityMixin, BaseEstimator)):
         _, _, log_resp = self._estimate_log_prob_resp(X)
         return np.exp(log_resp)
 
-    def _estimate_weighted_log_prob(self, X):
+    def _estimate_weighted_log_prob(self, X, normalized_weights=True):
         """Estimate the weighted log-probabilities, log P(X | Z) + log weights.
 
         Parameters
@@ -291,10 +291,10 @@ class BaseMixture(six.with_metaclass(ABCMeta, DensityMixin, BaseEstimator)):
         -------
         weighted_log_prob : array, shape (n_features, n_component)
         """
-        return self._estimate_log_prob(X) + self._estimate_log_weights()
+        return self._estimate_log_prob(X) + self._estimate_log_weights(normalized_weights)
 
     @abstractmethod
-    def _estimate_log_weights(self):
+    def _estimate_log_weights(self, normalized_weights=True):
         """Estimate log-weights in EM algorithm, E[ log pi ] in VB algorithm.
 
         Returns

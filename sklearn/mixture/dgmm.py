@@ -15,10 +15,11 @@ import numpy as np
 
 from scipy import linalg
 
-from .base_light import BaseMixture, _check_shape
+from .base_light import BaseMixture, _check_shape, _check_X
 from ..externals.six.moves import zip
 from ..utils import check_array
 from ..utils.validation import check_is_fitted
+from ..utils.extmath import logsumexp
 
 
 ###############################################################################
@@ -183,24 +184,14 @@ def _estimate_log_gaussian_prob_full(X, means, covariances):
     return log_prob
 
 
-class GaussianMixture(BaseMixture):
-    """Gaussian Mixture.
+class DGMM(BaseMixture):
+    """Dynamic Gaussian Mixture Model
 
     Representation of a Gaussian mixture model probability distribution.
-    This class allows to estimate the parameters of a Gaussian mixture
-    distribution.
+
 
     Parameters
     ----------
-    covariance_type : {'full', 'tied', 'diag', 'spherical'},
-        defaults to 'full'.
-        String describing the type of covariance parameters to use.
-        Must be one of::
-        'full' (each component has its own general covariance matrix).
-        'tied' (all components share the same general covariance matrix),
-        'diag' (each component has its own diagonal covariance matrix),
-        'spherical' (each component has its own single variance),
-
     reg_covar : float, defaults to 1e-6.
         Non-negative regularization added to the diagonal of covariance.
         Allows to assure that the covariance matrices are all positive.
@@ -256,12 +247,30 @@ class GaussianMixture(BaseMixture):
                  weights_init=None, means_init=None, covariances_init=None,
                  random_state=None,
                  verbose=0):
-        super(GaussianMixture, self).__init__(random_state=random_state)
+        super(DGMM, self).__init__(random_state=random_state)
 
         self.covariance_type = 'full'  # HARD CODE - DGME NEEDS FULL
         self.weights_init = weights_init
         self.means_init = means_init
         self.covariances_init = covariances_init
+
+    def __repr__(self):
+        """Define string which represents this object when printed."""
+        n_components = self.means_.shape[0]
+        return "DGMM: <%s components>" % str(n_components)
+
+    def set_partition(self, input_component_indices,
+                      output_component_indices=None):
+        """Choose which features should be considered inputs and outputs."""
+        self.input_indices = input_component_indices
+        self.output_indices = output_component_indices
+
+    def predict(self, input_vector):
+        check_is_fitted(self, ['weights_', 'input_indices', 'output_indices'])
+        pass
+
+    def add_gaussian(self, mu, sigma, weight=1):
+        pass
 
     def _check_parameters(self, X):
         """Check the Gaussian mixture parameters are well defined."""
@@ -295,18 +304,122 @@ class GaussianMixture(BaseMixture):
 
 
     def _estimate_log_prob(self, X):
-        estimate_log_prob_functions = {
-            "full": _estimate_log_gaussian_prob_full,
-            #"tied": _estimate_log_gaussian_prob_tied,
-            #"diag": _estimate_log_gaussian_prob_diag,
-            #"spherical": _estimate_log_gaussian_prob_spherical
-        }
-        return estimate_log_prob_functions[self.covariance_type](
-            X, self.means_, self.covariances_)
+        log_probs = _estimate_log_gaussian_prob_full(X, self.means_, self.covariances_)
 
-    def _estimate_log_weights(self):
-        normalized_weights = self.weights_ / np.sum(self.weights_)
-        return np.log(normalized_weights)
+        return log_probs
+
+    def _estimate_log_prob_input_pdf(self, X):
+        """
+        X : array-like, shape (n_observations, n_input_features)
+            It is assumed that the features in X are already ordered in a way
+            that corresponds to the indices in *self.input_indices*
+
+        """
+        # get "input" version of means and covariances, based on self.input_indices
+        #self.means_ : array-like, shape (n_components, n_features)
+        input_means = self.means_[:, self.input_indices]
+
+
+        # compute cartesian product of indices (an array  of coordinate tuples,
+        # each which identify a single element within the 3D covariances_ array.
+        mesh = np.ix_(np.arange(self.covariances_.shape[0]),
+                      self.input_indices,
+                      self.input_indices)
+
+        # self.covariances_ : array-like, shape (n_components, n_features, n_features)
+        input_covs = self.covariances_[mesh]
+        log_probs = _estimate_log_gaussian_prob_full(X, input_means, input_covs)
+
+        return log_probs
+
+
+    def get_pdf(self, X, normalized=True):
+        # TODO: rename "normalized" to something else, because it doesn't mean
+        #       'normalized pdf', but 'normalized weights', which is confusing.
+        """Return the total probability density of the mixture at *x*.
+
+        This is calculated as p(x) = \sum_i [w_i * p_i(x)] where
+        p_i is the probability of a single Gaussian component, and w_i is its
+        associated normalized weight.
+
+        If *normalized* is False, then unnormalized weights are used.
+
+        Return None if the mixture model does not yet contain any Gaussians.
+
+        """
+        n_components = self.means_.shape[0]
+        if len(n_components) == 0:
+            return None
+
+        # if X has 5 rows (i.e. 5 observations), then log_p_X will be a
+        # 5-element column vector containing log(p(x_i)) for each row i of X
+        log_p_X = self.score_samples(X, normalized_weights=normalized)
+
+        return np.exp(log_p_X)
+
+    def get_input_pdf(self, X, normalized=True):
+        """Return the total probability density of the mixture at *x*.
+
+        This is calculated as p(x) = \sum_i [w_i * p_i(x)] where
+        p_i is the probability of a single Gaussian component, and w_i is its
+        associated normalized weight.
+
+        If *normalized* is False, then unnormalized weights are used.
+
+        Return None if the mixture model does not yet contain any Gaussians.
+
+        """
+        n_components = self.means_.shape[0]
+        if len(n_components) == 0:
+            return None
+
+        # if X has 5 rows (i.e. 5 observations), then log_p_X will be a
+        # 5-element column vector containing log(p(x_i)) for each row i of X
+        log_p_X = self.score_samples_input_pdf(X, normalized_weights=normalized)
+
+        return np.exp(log_p_X)
+
+    def score_samples_input_pdf(self, X, normalized_weights=True):
+        """Compute the weighted log probabilities for each sample.
+
+        Parameters
+        ----------
+        X : array-like, shape (n_samples, n_features)
+            List of n_features-dimensional data points. Each row
+            corresponds to a single data point.
+
+        Returns
+        -------
+        log_prob : array, shape (n_samples,)
+            Log probabilities of each data point in X.
+        """
+        self._check_is_fitted()
+        X = _check_X(X, None, len(self.input_indices))
+
+        weighted_log_probs = self._estimate_weighted_log_prob_input_pdf(X, normalized_weights)
+        return logsumexp(weighted_log_probs, axis=1)
+
+    def _estimate_weighted_log_prob_input_pdf(self, X, normalized_weights=True):
+        """Estimate the weighted log-probabilities, log P(X | Z) + log weights.
+
+        Parameters
+        ----------
+        X : array-like, shape (n_samples, n_features)
+
+        Returns
+        -------
+        weighted_log_prob : array, shape (n_features, n_component)
+        """
+        return self._estimate_log_prob_input_pdf(X) + self._estimate_log_weights(normalized_weights)
+
+    def _estimate_log_weights(self, normalized_weights=True):
+        if normalized_weights:
+            weights = self.weights_ / np.sum(self.weights_)
+        else:
+            # use unnormalized weights
+            weights = self.weights_
+
+        return np.log(weights)
 
     def _check_is_fitted(self):
         # since DGME is incremental, this isn't a good measure of whether
