@@ -154,7 +154,7 @@ def _estimate_log_gaussian_prob_full(X, means, covariances):
 
     Parameters
     ----------
-    X : array-like, shape (n_samples, n_features)
+    X : array-like, shape (n_observations, n_features)
 
     means : array-like, shape (n_components, n_features)
 
@@ -162,17 +162,17 @@ def _estimate_log_gaussian_prob_full(X, means, covariances):
 
     Returns
     -------
-    log_prob : array, shape (n_samples, n_components)
+    log_prob : array, shape (n_observations, n_components)
     """
-    n_samples, n_features = X.shape
+    n_observations, n_features = X.shape
     n_components = means.shape[0]
-    log_prob = np.empty((n_samples, n_components))
+    log_prob = np.empty((n_observations, n_components))
     for k, (mu, cov) in enumerate(zip(means, covariances)):
         try:
             cov_chol = linalg.cholesky(cov, lower=True)
         except linalg.LinAlgError:
             raise ValueError("The algorithm has diverged because of too "
-                             "few samples per components. "
+                             "few observations per component. "
                              "Try to decrease the number of components, or "
                              "increase reg_covar.")
         cv_log_det = 2. * np.sum(np.log(np.diagonal(cov_chol)))
@@ -273,7 +273,7 @@ class DGMM(BaseMixture):
 
         Parameters
         ----------
-        X : array-like, shape (n_samples, n_features)
+        X : array-like, shape (n_observations, n_features)
             List of n_features-dimensional data points. Each row
             corresponds to a single data point.
 
@@ -290,13 +290,13 @@ class DGMM(BaseMixture):
         # we will clear any previous parameters when fitting
 
         self.means_ = np.array(X)
-        n_observations = self.means_.shape[0]
+        n_components = self.means_.shape[0]
         n_features = self.means_.shape[1]
 
         # TODO: replace 0.01 with self.init_cov_magnitude
         sigma_initial = np.eye(n_features) * 0.01
-        self.covariances_ = np.tile(sigma_initial, [n_observations, 1, 1])
-        self.weights_ = np.ones(n_observations)
+        self.covariances_ = np.tile(sigma_initial, [n_components, 1, 1])
+        self.weights_ = np.ones(n_components)
 
         return self
 
@@ -349,6 +349,9 @@ class DGMM(BaseMixture):
             It is assumed that the features in X are already ordered in a way
             that corresponds to the indices in *self.input_indices*
 
+        Returns
+        -------
+        log_prob : array, shape (n_observations, n_components)
         """
         # get "input" version of means and covariances, based on self.input_indices
         #self.means_ : array-like, shape (n_components, n_features)
@@ -419,13 +422,13 @@ class DGMM(BaseMixture):
 
         Parameters
         ----------
-        X : array-like, shape (n_samples, n_features)
+        X : array-like, shape (n_observations, n_features)
             List of n_features-dimensional data points. Each row
             corresponds to a single data point.
 
         Returns
         -------
-        log_prob : array, shape (n_samples,)
+        log_prob : array, shape (n_observations,)
             Log probabilities of each data point in X.
         """
         self._check_is_fitted()
@@ -439,11 +442,11 @@ class DGMM(BaseMixture):
 
         Parameters
         ----------
-        X : array-like, shape (n_samples, n_features)
+        X : array-like, shape (n_observations, n_features)
 
         Returns
         -------
-        weighted_log_prob : array, shape (n_features, n_component)
+        weighted_log_prob : array, shape (n_observations, n_components)
         """
         return self._estimate_log_prob_input_pdf(X) + self._estimate_log_weights(normalized_weights)
 
@@ -494,7 +497,7 @@ class DGMM(BaseMixture):
 
         Parameters
         ----------
-        X : array of shape (n_samples, n_dimensions)
+        X : array of shape (n_observations, n_dimensions)
 
         Returns
         -------
@@ -509,7 +512,7 @@ class DGMM(BaseMixture):
 
         Parameters
         ----------
-        X : array of shape(n_samples, n_dimensions)
+        X : array of shape(n_observations, n_dimensions)
 
         Returns
         -------
