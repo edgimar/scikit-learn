@@ -265,6 +265,41 @@ class DGMM(BaseMixture):
         self.input_indices = input_component_indices
         self.output_indices = output_component_indices
 
+    # TODO: is there a reason y is needed by the sklearn API?  If not,
+    # then remove it since it doesn't make sense here.  The model
+    # should always be fit to "full" observation vectors.
+    def fit(self, X, y=None):
+        """Estimate model parameters.
+
+        Parameters
+        ----------
+        X : array-like, shape (n_samples, n_features)
+            List of n_features-dimensional data points. Each row
+            corresponds to a single data point.
+
+        Returns
+        -------
+        self
+        """
+        # initially, we will make DGMM.fit() simply create one Gaussian
+        # per observation.
+        # apparently the most efficient way to build an array rather than
+        # appending to the array in a loop, is to use a list, and then
+        # convert to an array (e.g. np.array(L))
+
+        # we will clear any previous parameters when fitting
+
+        self.means_ = np.array(X)
+        n_observations = self.means_.shape[0]
+        n_features = self.means_.shape[1]
+
+        # TODO: replace 0.01 with self.init_cov_magnitude
+        sigma_initial = np.eye(n_features) * 0.01
+        self.covariances_ = np.tile(sigma_initial, [n_observations, 1, 1])
+        self.weights_ = np.ones(n_observations)
+
+        return self
+
     def predict(self, input_vector):
         check_is_fitted(self, ['weights_', 'input_indices', 'output_indices'])
         pass
@@ -348,7 +383,7 @@ class DGMM(BaseMixture):
 
         """
         n_components = self.means_.shape[0]
-        if len(n_components) == 0:
+        if n_components == 0:
             return None
 
         # if X has 5 rows (i.e. 5 observations), then log_p_X will be a
@@ -370,7 +405,7 @@ class DGMM(BaseMixture):
 
         """
         n_components = self.means_.shape[0]
-        if len(n_components) == 0:
+        if n_components == 0:
             return None
 
         # if X has 5 rows (i.e. 5 observations), then log_p_X will be a
