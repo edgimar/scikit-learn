@@ -263,6 +263,13 @@ class DGMM(BaseMixture):
                       output_component_indices=None):
         """Choose which features should be considered inputs and outputs."""
         self.input_indices = input_component_indices
+        if output_component_indices is None:
+            # construct output indices as complement to input indices
+            n_features = self.means_.shape[1]
+            output_component_indices = list(range(n_features))
+            for i in input_component_indices:
+                output_component_indices.remove(i)
+
         self.output_indices = output_component_indices
 
     # TODO: is there a reason y is needed by the sklearn API?  If not,
@@ -301,6 +308,67 @@ class DGMM(BaseMixture):
         return self
 
     def predict(self, input_vector):
+        # sklearn typically uses methods with this name to perform
+        # classification, not regression.
+        check_is_fitted(self, ['weights_', 'input_indices', 'output_indices'])
+        pass
+
+    def predict_y(self, input_vectors):
+        """Get expected value of outputs features given an input feature vector
+
+        The overall procedure required here is as follows:
+
+        1. Compute 3D array A with M 'rows' that look like:
+
+                [ ln(E_{1}[Y|X=x] ln(E_{1}[Y|X=x] ... ln(E_{N}[Y|X=x] ]
+
+            - M = number of rows in *input_vectors*
+            - N = number of mixture components
+            - each entry of this MxN 'matrix' is a P dimensional vector, where
+              P is the number of output features.
+
+        2. Compute a 2D array B with M rows that look like:
+
+                [ ln(w_1 p_{X,1}(X=x) ln(w_2 p_{X,2}(X=x) ... ln(w_N p_{X,N}(X=x) ]
+
+            - M = number of rows in *input_vectors*
+            - N = number of mixture components
+            - w_i = the unnormalized weight of the i^{th} mixture component
+            - p_{X,i} = the marginal pdf of the input-features for mixture component i
+
+        3. Compute a 1xM array C where each row (element) of the array is:
+
+                [ ln( \sum_i w_i P_{X,i}(X=x) ) ]
+
+            - this is computed from the step 2 array with the logsumexp() function
+
+        4. Compute an MxN array D in which each row of the step 2 array has had
+           the corresponding row of the step 3 array subtracted from it.
+            - the elements in each row of this array will be ln(k_i(x)), where
+              x is the input vector in *input_vectors* at the same row number.
+              k_i(x) is the "per-mixture-component weight" at x, and this value
+              is multiplied with E_{i}[Y|X=x] in order to produce one of the
+              summands in the sum which results in the overall E[Y|X=x] value
+              for a given input.
+
+        5. Compute the array F as the element-wise sum of A + D
+            - this will result in a 3D array, where, for example,
+                F_{11} = A_{11} + B_{11}  (F_{11} is a vector)
+            - A_{11} is a P-element vector (see step 1 above)
+            - B_{11} is a scalar, which is added to every element of A_{11}
+
+        6. Compute a matrix G, where the first two rows looks like:
+
+                [ logsumexp_{i} ( F_{1i}) ]
+                [ logsumexp_{i} ( F_{2i}) ]
+
+            - i goes from 1 to N (# of components)
+            - the first row is a vector whose values are equivalent to
+              ln(m(x_1)), where m(x_1) is E[Y | X = x_1]
+
+        7. Return np.exp(G)
+
+        """
         check_is_fitted(self, ['weights_', 'input_indices', 'output_indices'])
         pass
 
@@ -343,6 +411,45 @@ class DGMM(BaseMixture):
 
         return log_probs
 
+    def _compute_partitioned_means_and_covs(self):
+        """Use the chosen input indices to get input means and covariances.
+
+        TODO:  only (re)compute these if a dirty flag is set -- this will be
+               set any time the model has been updated / modified in some way.
+        """
+        check_is_fitted(self, ['input_indices', 'output_indices'])
+        # get "input" version of means and covariances, based on self.input_indices
+        #self.means_ : array-like, shape (n_components, n_features)
+        self.input_means_ = self.means_[:, self.input_indices]
+        self.output_means_ = self.means_[:, self.output_indices]
+
+        # compute cartesian product of indices (an array  of coordinate tuples,
+        # each which identify a single element within the 3D covariances_ array.
+        mesh = np.ix_(np.arange(self.covariances_.shape[0]),
+                      self.input_indices,
+                      self.input_indices)
+
+        # self.covariances_ : array-like, shape (n_components, n_features, n_features)
+        self.input_covariances_ = self.covariances_[mesh]
+
+        mesh = np.ix_(np.arange(self.covariances_.shape[0]),
+                      self.output_indices,
+                      self.input_indices)
+        self.yx_covariances_ = self.covariances_[mesh]
+
+        # now also compute and store the Cholesky decomposition for each
+        # xx covariance matrix
+        # TODO: only (re)compute this for components whose parameters have
+        # changed
+
+        xx_choleskys = []
+        for i in range(self.covariances_.shape[0]):
+            cov = self.input_covariances_[i]
+            # append matrices that can be used w/ scipy.linalg.cho_solve()
+            xx_choleskys.append(linalg.cho_factor(cov))
+
+        self.input_choleskys_ = np.array(xx_choleskys)
+
     def _estimate_log_prob_input_pdf(self, X):
         """
         X : array-like, shape (n_observations, n_input_features)
@@ -353,20 +460,10 @@ class DGMM(BaseMixture):
         -------
         log_prob : array, shape (n_observations, n_components)
         """
-        # get "input" version of means and covariances, based on self.input_indices
-        #self.means_ : array-like, shape (n_components, n_features)
-        input_means = self.means_[:, self.input_indices]
+        self._compute_partitioned_means_and_covs()
 
-
-        # compute cartesian product of indices (an array  of coordinate tuples,
-        # each which identify a single element within the 3D covariances_ array.
-        mesh = np.ix_(np.arange(self.covariances_.shape[0]),
-                      self.input_indices,
-                      self.input_indices)
-
-        # self.covariances_ : array-like, shape (n_components, n_features, n_features)
-        input_covs = self.covariances_[mesh]
-        log_probs = _estimate_log_gaussian_prob_full(X, input_means, input_covs)
+        log_probs = _estimate_log_gaussian_prob_full(X, self.input_means_,
+                                                     self.input_covariances_)
 
         return log_probs
 
