@@ -70,7 +70,8 @@ class BaseMixture(six.with_metaclass(ABCMeta, DensityMixin, BaseEstimator)):
     BaseMixture class in base.py, this version doesn't assume that EM will be
     used as an estimator.
     """
-
+    # TODO: add set_params and get_params method implementations which work
+    # with a parameter dictionary as a class attribute
     def __init__(self, random_state):
         self.random_state = random_state
 
@@ -128,73 +129,6 @@ class BaseMixture(six.with_metaclass(ABCMeta, DensityMixin, BaseEstimator)):
         """
         pass
 
-    def fit_ORIG(self, X, y=None):
-        """Estimate model parameters with the EM algorithm.
-
-        The method fit the model `n_init` times and set the parameters with
-        which the model has the largest likelihood or lower bound. Within each
-        trial, the method iterates between E-step and M-step for `max_iter`
-        times until the change of likelihood or lower bound is less than
-        `tol`, otherwise, a `ConvergenceWarning` is raised.
-
-        Parameters
-        ----------
-        X : array-like, shape (n_samples, n_features)
-            List of n_features-dimensional data points. Each row
-            corresponds to a single data point.
-
-        Returns
-        -------
-        self
-        """
-        X = _check_X(X, self.n_components)
-        self._check_initial_parameters(X)
-
-        # if we enable warm_start, we will have a unique initialisation
-        do_init = not(self.warm_start and hasattr(self, 'converged_'))
-        n_init = self.n_init if do_init else 1
-
-        max_log_likelihood = -np.infty
-        self.converged_ = False
-
-        for init in range(n_init):
-            self._print_verbose_msg_init_beg(init)
-
-            if do_init:
-                self._initialize_parameters(X)
-            current_log_likelihood, resp = self._e_step(X)
-
-            for n_iter in range(self.max_iter):
-                prev_log_likelihood = current_log_likelihood
-
-                self._m_step(X, resp)
-                current_log_likelihood, resp = self._e_step(X)
-                change = current_log_likelihood - prev_log_likelihood
-                self._print_verbose_msg_iter_end(n_iter, change)
-
-                if abs(change) < self.tol:
-                    self.converged_ = True
-                    break
-
-            self._print_verbose_msg_init_end(current_log_likelihood)
-
-            if current_log_likelihood > max_log_likelihood:
-                max_log_likelihood = current_log_likelihood
-                best_params = self._get_parameters()
-                best_n_iter = n_iter
-
-        if not self.converged_:
-            warnings.warn('Initialization %d did not converged. '
-                          'Try different init parameters, '
-                          'or increase n_init, tol '
-                          'or check for degenerate data.'
-                          % (init + 1), ConvergenceWarning)
-
-        self._set_parameters(best_params)
-        self.n_iter_ = best_n_iter
-
-        return self
-
     @abstractmethod
     def _check_is_fitted(self):
         pass
@@ -226,6 +160,11 @@ class BaseMixture(six.with_metaclass(ABCMeta, DensityMixin, BaseEstimator)):
 
         return logsumexp(self._estimate_weighted_log_prob(X, normalized_weights), axis=1)
 
+    # RegressorMixin also provides a score() method -- when we inherit from
+    # from both BaseMixture and RegressorMixin, this isn't very nice -- it may
+    # therefore be preferable to make these methods abstract, and implement them
+    # in subclasses.
+    @abstractmethod
     def score(self, X, y=None):
         """Compute the per-sample average log-likelihood of the given data X.
 
@@ -240,9 +179,11 @@ class BaseMixture(six.with_metaclass(ABCMeta, DensityMixin, BaseEstimator)):
         log_likelihood : float
             Log likelihood of the Gaussian mixture given X.
         """
-        return self.score_samples(X).mean()
+        pass
 
-    def predict(self, X, y=None):
+    # this predict method isn't suitable for DGMMs, so it's been renamed for now -- perhaps better to make
+    # this abstract?
+    def predict_OLD(self, X, y=None):
         """Predict the labels for the data samples in X using trained model.
 
         Parameters
