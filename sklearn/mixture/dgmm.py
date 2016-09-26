@@ -285,7 +285,11 @@ class DGMM(BaseMixture, RegressorMixin):
 
     def __repr__(self):
         """Define string which represents this object when printed."""
-        n_components = self.means_.shape[0]
+        try:
+            n_components = self.means_.shape[0]
+        except AttributeError:
+            n_components = 0
+
         return "DGMM: <%s components>" % str(n_components)
 
     def set_partition(self, input_component_indices,
